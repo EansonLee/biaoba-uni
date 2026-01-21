@@ -118,6 +118,22 @@
 			init(options) {
 				// 初始化用户数据
 				const authStore = $stores('user');
+
+				// 检查是否刚刚登出（防止进程杀死后的状态错误）
+				const logoutTimestamp = uni.getStorageSync('logout-timestamp');
+				const currentTime = Date.now();
+				const timeSinceLogout = logoutTimestamp ? currentTime - logoutTimestamp : Infinity;
+
+				console.log('⏰ [App初始化] 上次登出时间:', logoutTimestamp);
+				console.log('⏰ [App初始化] 当前时间:', currentTime);
+				console.log('⏰ [App初始化] 登出后经过时间:', timeSinceLogout, '毫秒');
+
+				// 如果登出时间戳是最近（30秒内），强制清理任何残留数据
+				if (timeSinceLogout < 30 * 1000) {
+					console.warn('⚠️ [App初始化] 检测到最近登出，清理残留数据');
+					authStore.clearUserInfo();
+				}
+
 				const initAuth = authStore.initAuth();
 				const zegoStore = $stores('zegoStore').initEvent();
 				const currentPage = getCurrentPages().pop();

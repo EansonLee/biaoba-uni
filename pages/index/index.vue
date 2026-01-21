@@ -112,9 +112,21 @@ const skipAnimation = () => {
 };
 
 onReady(() => {
-	if($stores('user').getUserInfo()){
+	// 严格的登录状态检查：必须同时满足3个条件
+	const authStore = $stores('user');
+	const hasUserInfo = authStore.getUserInfo();
+	const hasToken = !!uni.getStorageSync('token');
+	const isLoginState = authStore.isLogin;
+
+	// 只有当三个条件都满足时，才认为用户已登录
+	if (hasUserInfo && hasToken && isLoginState) {
+		console.log('✅ [登录页] 检测到有效登录状态，跳转首页');
 		sheep.$router.go('/pages/game/home/index');
 		return
+	} else if (hasUserInfo || hasToken || isLoginState) {
+		// 检测到不完整的登录状态，强制清理
+		console.warn('⚠️ [登录页] 检测到不完整的登录状态，进行强制清理');
+		authStore.clearUserInfo();
 	}
   
   // 监听屏幕方向准备就绪事件
