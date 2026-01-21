@@ -1,0 +1,244 @@
+{
+	"pages": [
+		{
+			"path": "pages/index/index",
+			"aliasPath": "/",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/player/account/registerAndForgot",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/player/account/bindEamil",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/home/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/player/profile/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/player/setting/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/01/index",
+			"style": {
+				"navigationBarTitleText": "标靶",
+				"app-plus": {
+					"subNVues": [
+						{
+							"id": "remoteVideo",
+							"path": "pages/game/01/subnvue/remoteVideo",
+							"style": {
+								"position": "absolute",
+								"width": "146rpx",
+								"height": "64rpx",
+								"bottom": "3%",
+								"left": "4%",
+								"background": "transparent"
+							}
+						},
+						{
+							"id": "localVideo",
+							"path": "pages/game/01/subnvue/localVideo",
+							"style": {
+								"position": "absolute",
+								"width": "146rpx",
+								"height": "64rpx",
+								"bottom": "3%",
+								"right": "8%",
+								"background": "transparent"
+							}
+						}
+					]
+				}
+			}
+		},
+		{
+			"path": "pages/game/01/gameSelection",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/selectPlayer/offline/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/routine/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/player/game/gameData",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/mickeyMouse/index",
+			"style": {
+				"navigationBarTitleText": "标靶",
+				"app-plus": {
+					"subNVues": [
+						{
+							"id": "remoteVideo",
+							"path": "pages/game/mickeyMouse/subnvue/remoteVideo",
+							"style": {
+								"position": "absolute",
+								"width": "146rpx",
+								"height": "64rpx",
+								"bottom": "3%",
+								"left": "4%",
+								"background": "transparent"
+							}
+						},
+						{
+							"id": "localVideo",
+							"path": "pages/game/mickeyMouse/subnvue/localVideo",
+							"style": {
+								"position": "absolute",
+								"width": "146rpx",
+								"height": "64rpx",
+								"bottom": "3%",
+								"right": "8%",
+								"background": "transparent"
+							}
+						}
+					]
+				}
+			}
+		},
+		{
+			"path": "pages/game/routine/suddenDeath/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/routine/highMark/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/routine/twist/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/routine/twist/i2",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/routine/xo/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/routine/practice/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/01/freeze/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/mixed/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/mixed/modeIndex",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/mixed/minedIndex",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/aiMode/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/online/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/player/game/gameTrainData",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/player/friend/index",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/online/automatic",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		},
+		{
+			"path": "pages/game/online/shipin",
+			"style": {
+				"navigationBarTitleText": "标靶"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "标靶",
+		"navigationBarBackgroundColor": "#170746",
+		"backgroundColor": "#170746",
+		"navigationStyle": "custom",
+		"pageOrientation": "landscape",
+		"app-plus": {
+			"titleNView": false,
+			"bounce": "none"
+		},
+		"rpxCalcMaxDeviceWidth": 2000,
+		"enablePullDownRefresh": false
+	},
+	"uniIdRouter": {}
+}

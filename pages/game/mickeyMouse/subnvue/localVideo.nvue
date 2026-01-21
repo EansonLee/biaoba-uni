@@ -1,0 +1,1177 @@
+<template>
+	<view
+		class="video-container"
+		@touchstart="handleTouchStart"
+		@touchmove="handleTouchMove"
+		@touchend="handleTouchEnd"
+	>
+		<!-- #ifdef APP-PLUS -->
+		<zego-local-view
+			ref="zegoLocalView"
+			style="flex: 1;"
+			@onViewCreated="onLocalViewCreated"
+			@onViewDestroyed="onLocalViewDestroyed"
+		></zego-local-view>
+		<!-- #endif -->
+
+		<view class="voice" @click="voice">
+		<image style="width: 16rpx;height: 16rpx; " :src="'/static/images/video/voice-'+(voiceDisable?'close':'open')+'.png'" mode="widthFix" ></image>
+		</view>
+
+		<!-- 关闭按钮 - 仅在超过默认大小时显示 -->
+		<view v-if="isOverDefaultSize" class="close-button" @click="resetToDefault">
+			<text class="close-text">关闭</text>
+		</view>
+
+		<!-- 四角缩放控制点 - 直接定位，与绿色测试点使用相同坐标系 -->
+		<!-- 左上角 -->
+		<view class="scale-corner scale-corner-tl" :class="{ 'transparent': !showInteraction }"
+			@touchstart="handleScaleStart"
+			@touchmove="handleScaleMove"
+			@touchend="handleScaleEnd">
+			<view class="corner-line corner-line-h"></view>
+			<view class="corner-line corner-line-v"></view>
+		</view>
+
+		<!-- 右上角 -->
+		<view class="scale-corner scale-corner-tr" :class="{ 'transparent': !showInteraction }"
+			@touchstart="handleScaleStart"
+			@touchmove="handleScaleMove"
+			@touchend="handleScaleEnd">
+			<view class="corner-line corner-line-h"></view>
+			<view class="corner-line corner-line-v"></view>
+		</view>
+
+		<!-- 左下角 -->
+		<view class="scale-corner scale-corner-bl" :class="{ 'transparent': !showInteraction }"
+			@touchstart="handleScaleStart"
+			@touchmove="handleScaleMove"
+			@touchend="handleScaleEnd">
+			<view class="corner-line corner-line-h"></view>
+			<view class="corner-line corner-line-v"></view>
+		</view>
+
+		<!-- 右下角 -->
+		<view class="scale-corner scale-corner-br" :class="{ 'transparent': !showInteraction }"
+			@touchstart="handleScaleStart"
+			@touchmove="handleScaleMove"
+			@touchend="handleScaleEnd">
+			<view class="corner-line corner-line-h"></view>
+			<view class="corner-line corner-line-v"></view>
+		</view>
+	</view>
+</template>
+
+<script setup>
+	import {
+		ref,
+		reactive,
+		onMounted,
+		onUnmounted,
+		getCurrentInstance
+	} from "vue"
+	import {
+		onUnload
+	} from '@dcloudio/uni-app';
+	import ZegoLocalView from "@/uni_modules/zego-ZegoExpressUniApp-JS/components/zego-ZegoExpressUniApp-JS/zego-view/ZegoLocalView";
+	import ZegoExpressEngine, {
+		ZegoOrientation
+	} from '@/uni_modules/zego-ZegoExpressUniApp-JS/components/zego-ZegoExpressUniApp-JS/lib/ZegoExpressEngine';
+	import permision from "@/composables/permission.js";
+	import {
+		useZego
+	} from "@/composables/useZego";
+	import {
+		usePublish
+	} from "@/composables/usePublish";
+	import {
+		usePlay
+	} from "@/composables/usePlay";
+	import keyCenter from "@/composables/KeyCenter.js";
+	const {
+		info,
+		logHeight,
+		userID,
+		userName,
+		isLogin,
+		isRequest,
+		engine,
+		// 方法
+		createEngine,
+		loginRoom,
+		logoutRoom,
+		changeLogViewSize,
+		appendActionInfo,
+		appendSuccessInfo,
+		appendFailureInfo,
+		appendCallbackInfo
+	} = useZego()
+	const {
+		publishStreamID,
+		publishBtnName,
+		isPublishingStream,
+		localVideoElem,
+		pubVideoMuted,
+		startPublishingStream,
+		stopPublishingStream,
+		startPreview,
+		stopPreview,
+		onClickPublish,
+		addPublishListeners,
+	} = usePublish({
+		engine,
+		appendActionInfo,
+		appendCallbackInfo,
+		appendSuccessInfo
+	})
+	const {
+		playStreamID,
+		playVideoElem,
+		isPlayingStream,
+		playBtnName,
+		playVideoMuted,
+		playStream,
+		onClickPlay,
+		startPlayingStream,
+		stopPlayingStream,
+		addPlayListeners,
+		playError
+	} = usePlay({
+		engine,
+		appendActionInfo,
+		appendCallbackInfo,
+		appendSuccessInfo
+	})
+	const userInfo = uni.getStorageSync('userInfo');
+	const state = reactive({
+		playStreamID: userInfo.playerOnly
+	});
+
+	// 预览状态追踪
+	const isPreviewActive = ref(false);
+
+	// 页面状态管理
+	const isPageActive = ref(true);
+	const initializationInProgress = ref(false);
+
+	// 拖拽相关状态 - 默认开启
+	const dragMode = ref(true)
+	const dragData = ref(null)
+	const voiceDisable = ref(false)
+
+	// 缩放相关状态 - 默认开启
+	const scaleMode = ref(true)
+	const scaleData = ref(null)
+	const initialDistance = ref(0)
+	const cornerScaleData = ref(null)
+
+	// 交互显示状态
+	const showInteraction = ref(true)
+	const interactionTimer = ref(null)
+
+	// 默认大小状态
+	const isOverDefaultSize = ref(false)
+	const defaultSize = { width: 146, height: 64 } // rpx单位
+
+	// 窗口位置信息（用于修复缩放方向问题）
+	const windowPosition = ref({
+		left: 0,
+		top: 0,
+		width: 146,
+		height: 64,
+		screenWidth: 375,
+		screenHeight: 667
+	})
+
+	onMounted(async () => {
+		// #ifdef APP-PLUS
+		uni.$on('stopLocalVideo', async (e) => {
+			try {
+				// 🔧 停止本地视频时的完整清理（米奇模式）
+				await stopPublishingStream();
+
+				// 停止预览
+				if (isPreviewActive.value) {
+					await stopPreview();
+					isPreviewActive.value = false;
+				}
+
+				// 退出房间
+				const roomId = uni.getStorageSync('roomID');
+				if (engine.value && roomId) {
+					await logoutRoom(roomId);
+				}
+			} catch (error) {
+				console.error('停止本地视频时出错:', error);
+			}
+		})
+		uni.$on('resize', async (e) => {
+			if (engine.value) {
+				engine.value.setAppOrientation(e)
+			}
+		})
+
+		// 检查是否为线上对战模式
+		const gameSettings = uni.getStorageSync('currentGameSettings');
+		if (!gameSettings || gameSettings.type !== 11) {
+			console.log('301游戏：非线上对战模式，跳过视频初始化');
+			return;
+		}
+
+		try {
+			const platform = uni.getSystemInfoSync().platform;
+
+			if (platform === "android") {
+				console.log('请求Android权限...');
+				await permision.requestAndroidPermission(
+					"android.permission.RECORD_AUDIO"
+				);
+				await permision.requestAndroidPermission(
+					"android.permission.CAMERA"
+				);
+			} else if (platform === "ios") {
+				// iOS权限请求 - 使用uni.createLivePusherContext
+				try {
+					console.log('🎥 [localVideo] iOS设备开始权限请求');
+
+					// 使用Zego startPreview直接触发摄像头权限
+					console.log('🎥 [localVideo] 使用Zego startPreview方法直接触发摄像头权限');
+
+					// 先创建引擎
+					await createEngine();
+					console.log('🎥 [localVideo] Zego引擎创建完成');
+
+					// 使用startPreview触发权限请求
+					const permissionResult = await requestCameraPermissionWithZegoPreview();
+					console.log('🎥 [localVideo] Zego startPreview权限请求结果:', permissionResult);
+
+					if (permissionResult === 0) {
+						console.log('🎥 [localVideo] 摄像头权限被拒绝，但继续初始化');
+						uni.showToast({
+							title: '摄像头权限被拒绝，视频功能可能受限',
+							icon: 'none',
+							duration: 3000
+						});
+					} else if (permissionResult === 1) {
+						console.log('🎥 [localVideo] 摄像头权限获取成功');
+					} else {
+						console.log('🎥 [localVideo] 权限状态未确定，继续初始化');
+					}
+
+					console.log('=== iOS权限请求完成，继续初始化视频组件 ===');
+				} catch (authError) {
+					console.error('权限请求整体异常，继续初始化:', authError);
+				}
+			}
+
+			// 直接尝试初始化，如果权限有问题，Zego引擎会报错
+			try {
+				await init();
+			} catch (initError) {
+				console.error('视频初始化失败:', initError);
+				uni.showToast({
+					title: '视频初始化失败',
+					icon: 'none'
+				});
+			}
+		} catch (error) {
+			console.error('localVideo初始化失败:', error);
+			uni.showToast({
+				title: '视频初始化失败: ' + error.message,
+				icon: 'none'
+			});
+		}
+		// #endif
+	})
+
+
+	// 使用Zego startPreview请求摄像头权限
+	const requestCameraPermissionWithZegoPreview = () => {
+		return new Promise(async (resolve) => {
+			try {
+				console.log('🎬 [localVideo] 使用Zego startPreview请求摄像头权限');
+
+				if (!engine.value) {
+					console.log('🎬 [localVideo] Zego引擎未创建，无法使用startPreview');
+					resolve(-1);
+					return;
+				}
+
+				console.log('🎬 [localVideo] 开始调用startPreview...');
+
+				// 调用startPreview，这会直接触发摄像头权限请求
+				await engine.value.startPreview();
+				isPreviewActive.value = true; // 标记预览已激活
+
+				console.log('🎬 [localVideo] startPreview调用成功，权限已获取');
+				console.log('🎬 [localVideo] 保持预览状态，不停止预览以维持视频流连续性');
+
+				// 不再停止预览！保持视频流的连续性
+				resolve(1); // 权限获取成功
+
+			} catch (error) {
+				console.log('🎬 [localVideo] startPreview失败:', error);
+				isPreviewActive.value = false; // 重置预览状态
+
+				// 检查错误类型
+				if (error.message && (
+					error.message.includes('permission') ||
+					error.message.includes('Permission') ||
+					error.message.includes('denied') ||
+					error.message.includes('Denied')
+				)) {
+					console.log('🎬 [localVideo] 摄像头权限被拒绝');
+					resolve(0); // 权限被拒绝
+				} else {
+					console.log('🎬 [localVideo] 其他错误，可能是权限问题:', error.message);
+
+					// 检查权限状态
+					setTimeout(() => {
+						const appAuthorizeSetting = uni.getAppAuthorizeSetting();
+						console.log('🎬 [localVideo] 检查权限状态:', appAuthorizeSetting.cameraAuthorized);
+						if (appAuthorizeSetting.cameraAuthorized === 'authorized') {
+							console.log('🎬 [localVideo] 权限实际已授权');
+							resolve(1);
+						} else if (appAuthorizeSetting.cameraAuthorized === 'denied') {
+							resolve(0);
+						} else {
+							resolve(-1);
+						}
+					}, 500);
+				}
+			}
+		});
+	};
+
+	// iOS设备特定处理
+	const handleIOSVideoIssue = async () => {
+		const systemInfo = uni.getSystemInfoSync();
+		console.log('🎬 [localVideo] 设备信息:', {
+			platform: systemInfo.platform,
+			system: systemInfo.system,
+			model: systemInfo.model,
+			version: systemInfo.version
+		});
+
+		// 针对特定iOS版本或设备型号的处理
+		if (systemInfo.platform === 'ios') {
+			console.log('🎬 [localVideo] 检测到iOS设备，执行特定处理');
+
+			// 根据iOS版本调整延迟时间
+			const iosVersion = parseFloat(systemInfo.system.replace('iOS ', ''));
+			const delayTime = iosVersion < 14 ? 2000 : 1000; // 老版本iOS需要更长延迟
+
+			console.log(`🎬 [localVideo] iOS ${iosVersion}，延迟 ${delayTime}ms`);
+			await new Promise(resolve => setTimeout(resolve, delayTime));
+
+			// 检查预览状态，如果需要则重新启动
+			if (engine.value && isPreviewActive.value) {
+				try {
+					console.log('🎬 [localVideo] iOS特定处理：确保预览正确运行');
+
+					// 先停止再启动，确保预览正确绑定到视图
+					await engine.value.stopPreview();
+					await engine.value.startPreview();
+
+					console.log('🎬 [localVideo] iOS特定处理：重启预览完成');
+				} catch (error) {
+					console.log('🎬 [localVideo] iOS特定处理失败，尝试备用方案:', error.message);
+
+					// 备用方案：多次重试
+					for (let i = 0; i < 3; i++) {
+						try {
+							await new Promise(resolve => setTimeout(resolve, 500));
+							await engine.value.startPreview();
+							console.log(`🎬 [localVideo] 备用方案重试 ${i + 1} 成功`);
+							break;
+						} catch (retryError) {
+							console.log(`🎬 [localVideo] 备用方案重试 ${i + 1} 失败:`, retryError.message);
+						}
+					}
+				}
+			}
+		}
+	};
+
+	const init = async () => {
+		// 防止重复初始化
+		if (initializationInProgress.value) {
+			console.log('🎬 [localVideo] 初始化正在进行中，跳过重复调用');
+			return;
+		}
+
+		// 检查页面是否仍然活跃
+		if (!isPageActive.value) {
+			console.log('🎬 [localVideo] 页面已不活跃，取消初始化');
+			return;
+		}
+
+		initializationInProgress.value = true;
+
+		try {
+			console.log('🎬 [localVideo] ===== 开始视频初始化 =====');
+			const roomId = uni.getStorageSync('roomID');
+			const zeGoToken = uni.getStorageSync('zeGoToken');
+
+			console.log('🎬 [localVideo] 存储数据检查:', { roomId, zeGoToken: zeGoToken ? '已获取' : '未获取' });
+
+			if (!roomId || !zeGoToken) {
+				console.error('🎬 [localVideo] 缺少必要的存储数据');
+				return;
+			}
+
+			keyCenter.setToken(zeGoToken);
+			console.log('🎬 [localVideo] Token设置完成');
+
+			// 如果引擎还未创建，则创建引擎
+			if (!engine.value) {
+				console.log('🎬 [localVideo] 开始创建Zego引擎...');
+				await createEngine() //创建引擎
+				console.log('🎬 [localVideo] Zego引擎创建完成');
+			} else {
+				console.log('🎬 [localVideo] Zego引擎已存在，跳过创建');
+			}
+
+
+			console.log('🎬 [localVideo] 开始登录房间...', { roomId, userID: userInfo.playerOnly, userName: userInfo.playerName });
+
+			// 网络环境检查和重试机制
+			let loginSuccess = false;
+			for (let attempt = 1; attempt <= 3; attempt++) {
+				try {
+					console.log(`🎬 [localVideo] 登录尝试 ${attempt}/3`);
+					await Promise.race([
+						loginRoom(roomId, userInfo.playerOnly, userInfo.playerName),
+						new Promise((_, reject) => setTimeout(() => reject(new Error('登录超时')), 10000))
+					]);
+					loginSuccess = true;
+					console.log('🎬 [localVideo] 房间登录完成');
+					break;
+				} catch (loginError) {
+					console.log(`🎬 [localVideo] 登录尝试 ${attempt} 失败:`, loginError.message);
+					if (attempt < 3) {
+						console.log(`🎬 [localVideo] 等待 ${attempt * 2}s 后重试...`);
+						await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+					}
+				}
+			}
+
+			if (!loginSuccess) {
+				throw new Error('房间登录失败，请检查网络连接');
+			}
+
+			// 🔊 专门解决重音问题的强化配置（米奇模式）
+			try {
+				// 1. 启用最强回音消除 (AEC)
+				await engine.value.enableAEC(true);
+				// 2. 启用耳机回音消除
+				// #ifdef APP-PLUS
+				try {
+					await engine.value.enableHeadphoneAEC(true);
+				} catch (headphoneError) {
+					console.log('⚠️ [重音消除-米奇] 耳机回音消除不支持，跳过');
+				}
+				// #endif
+
+				// 3. 启用自动增益控制
+				await engine.value.enableAGC(true);
+
+				// 4. 启用噪声抑制
+				await engine.value.enableANS(true);
+
+				// 5. 设置音频路由
+				await engine.value.setAudioRouteToSpeaker(true);
+
+				// 6.降低麦克风增益
+				try {
+					if (typeof engine.value.setCaptureVolume === 'function') {
+						await engine.value.setCaptureVolume(60);
+					}
+				} catch (volumeError) {
+					console.log('⚠️ [重音消除-米奇] 麦克风增益设置跳过');
+				}
+
+				// 7.设置播放音量
+				try {
+					if (typeof engine.value.setPlayVolume === 'function') {
+						await engine.value.setPlayVolume(80);
+						console.log('✅ [重音消除-米奇] 播放音量已设置为80%');
+					}
+				} catch (playVolumeError) {
+					console.log('⚠️ [重音消除-米奇] 播放音量设置跳过');
+				}
+			} catch (audioError) {
+				console.error('❌ [重音消除-米奇] 配置失败:', audioError);
+				// 不阻断流程，继续执行
+			}
+
+			// 检查是否已经在预览中（权限获取时可能已启动）
+			if (!isPreviewActive.value) {
+				console.log('🎬 [localVideo] 开始启动预览...');
+				await startPreview();
+				isPreviewActive.value = true;
+				console.log('🎬 [localVideo] 预览启动完成');
+			} else {
+				console.log('🎬 [localVideo] 预览已在运行，跳过启动');
+			}
+
+			console.log('🎬 [localVideo] 开始推流...', { streamID: state.playStreamID });
+			await startPublishingStream(state.playStreamID);
+			console.log('🎬 [localVideo] 推流启动完成');
+
+			console.log('🎬 [localVideo] ===== 视频初始化完成 =====');
+
+			// iOS设备特定处理
+			await handleIOSVideoIssue();
+
+		} catch (error) {
+			console.error('🎬 [localVideo] init 失败:', error);
+			console.error('🎬 [localVideo] 错误详情:', {
+				message: error.message,
+				stack: error.stack,
+				name: error.name
+			});
+		} finally {
+			initializationInProgress.value = false;
+		}
+	}
+
+	onUnload(async () => {
+		try {
+			// 🔧 混合模式兼容：页面卸载时只销毁引擎，不断开连接（米奇模式）
+			// 因为混合模式的"下一局"会重新启动页面，但不应该断开语音连接
+			// 真正的断开连接通过 stopLocalVideo 事件处理
+
+			ZegoExpressEngine.destroyEngine();
+
+		} catch (error) {
+			// 确保即使出错也要销毁引擎
+			ZegoExpressEngine.destroyEngine();
+		}
+	})
+
+	// 🎵 智能音频控制函数 - 支持游戏音效过滤（米奇模式）
+	const voice = async () => {
+		voiceDisable.value = !voiceDisable.value;
+
+		if (engine.value) {
+			if (voiceDisable.value) {
+				// 关闭麦克风
+				engine.value.mutePublishStreamAudio(true);
+			} else {
+				// 开启麦克风，确保音频过滤生效
+				engine.value.mutePublishStreamAudio(false);
+
+				try {
+					await engine.value.enableAEC(true);
+					await engine.value.enableANS(true);
+				} catch (error) {
+					console.log(`🎤 [mickeyLocalVideo] 麦克风已开启 - 基础模式`);
+				}
+			}
+		}
+	}
+
+	// 拖拽事件处理
+	const handleTouchStart = (event) => {
+		showInteractionElements() // 显示交互元素
+
+		// 检查是否点击在特殊元素上（包括子元素）
+		const target = event.target || event.currentTarget
+		let currentElement = target
+
+		// 向上遍历DOM树，检查是否在特殊控制点内
+		while (currentElement && currentElement !== event.currentTarget) {
+			if (currentElement.classList && (
+				currentElement.classList.contains('scale-corner') ||
+				currentElement.classList.contains('voice') // 🎵 添加音频按钮检查
+			)) {
+				console.log('点击在特殊控制元素上，不处理拖拽')
+				return // 如果点击在特殊控制元素上，不处理拖拽
+			}
+			currentElement = currentElement.parentElement
+		}
+
+		// 如果正在进行角落缩放，不处理拖拽
+		if (cornerScaleData.value) {
+			console.log('正在进行角落缩放，不处理拖拽')
+			return
+		}
+
+		// 移除双指缩放功能，简化操作体验
+		// 双指缩放已禁用，专注于四角拖拽缩放
+
+		if (!dragMode.value) return
+
+		console.log('本地视频开始拖拽', event);
+		// nvue中使用changedTouches而不是touches
+		let touch = null;
+		if (event.changedTouches && event.changedTouches.length > 0) {
+			touch = event.changedTouches[0];
+		} else if (event.touches && event.touches.length > 0) {
+			touch = event.touches[0];
+		}
+
+		if (!touch) {
+			console.error('无法获取触摸点信息', event);
+			return;
+		}
+
+		dragData.value = {
+			startX: touch.screenX || touch.pageX || touch.clientX || 0,
+			startY: touch.screenY || touch.pageY || touch.clientY || 0,
+			startTime: Date.now(),
+			lastX: touch.screenX || touch.pageX || touch.clientX || 0,
+			lastY: touch.screenY || touch.pageY || touch.clientY || 0
+		}
+		console.log('本地视频拖拽数据初始化:', dragData.value);
+	}
+
+	const handleTouchMove = (event) => {
+		// 如果是缩放模式，优先处理双指缩放手势
+		if (scaleMode.value && event.changedTouches && event.changedTouches.length >= 2) {
+			if (handleScaleGesture(event)) return
+		}
+
+		if (!dragMode.value || !dragData.value) return
+
+		event.preventDefault()
+		// nvue中使用changedTouches而不是touches
+		let touch = null;
+		if (event.changedTouches && event.changedTouches.length > 0) {
+			touch = event.changedTouches[0];
+		} else if (event.touches && event.touches.length > 0) {
+			touch = event.touches[0];
+		}
+
+		if (!touch) {
+			console.error('handleTouchMove: 无法获取触摸点信息');
+			return;
+		}
+
+		const currentX = touch.screenX || touch.pageX || touch.clientX || 0
+		const currentY = touch.screenY || touch.pageY || touch.clientY || 0
+
+		// 计算相对于上一次位置的增量
+		const deltaX = currentX - dragData.value.lastX
+		const deltaY = currentY - dragData.value.lastY
+
+		// 更新最后位置
+		dragData.value.lastX = currentX
+		dragData.value.lastY = currentY
+
+		console.log('本地视频拖拽移动', { deltaX, deltaY, currentX, currentY });
+
+		// 通知父页面更新位置
+		uni.$emit('localVideoMove', { deltaX, deltaY })
+	}
+
+	const handleTouchEnd = (event) => {
+		// 移除双指缩放功能，简化操作体验
+
+		if (!dragMode.value) return
+		console.log('本地视频结束拖拽');
+		dragData.value = null
+	}
+
+	// 监听拖拽模式切换
+	uni.$on('localDragModeChange', (enabled) => {
+		dragMode.value = enabled
+	})
+
+	// 监听关闭按钮状态变化和窗口位置更新
+	uni.$on('localVideoSizeChange', (data) => {
+		// 只有在明确传递isOverSize且不为false时才更新关闭按钮状态
+		if (data.hasOwnProperty('isOverSize') && data.isOverSize !== false) {
+			isOverDefaultSize.value = data.isOverSize
+		}
+		// 始终更新窗口位置信息
+		if (data.windowPosition) {
+			windowPosition.value = data.windowPosition
+		}
+	})
+
+	// 监听缩放模式切换
+	uni.$on('localScaleModeChange', (enabled) => {
+		scaleMode.value = enabled
+	})
+
+	// 计算两点间距离
+	const getDistance = (touch1, touch2) => {
+		const dx = touch1.screenX - touch2.screenX
+		const dy = touch1.screenY - touch2.screenY
+		return Math.sqrt(dx * dx + dy * dy)
+	}
+
+	// 处理缩放手势（双指）
+	const handleScaleGesture = (event) => {
+		if (!scaleMode.value) return false
+
+		if (event.changedTouches && event.changedTouches.length >= 2) {
+			const touch1 = event.changedTouches[0]
+			const touch2 = event.changedTouches[1]
+			const distance = getDistance(touch1, touch2)
+
+			if (event.type === 'touchstart') {
+				initialDistance.value = distance
+				scaleData.value = {
+					startDistance: distance,
+					startScale: 1.0
+				}
+				console.log('本地视频开始缩放手势', { distance })
+				return true
+			} else if (event.type === 'touchmove' && scaleData.value) {
+				const scale = distance / scaleData.value.startDistance
+				const clampedScale = Math.max(0.5, Math.min(3.0, scale))
+
+				console.log('本地视频缩放手势移动', { distance, scale: clampedScale })
+
+				// 通知父页面更新缩放
+				uni.$emit('localVideoScale', { scale: clampedScale })
+				return true
+			} else if (event.type === 'touchend') {
+				scaleData.value = null
+				console.log('本地视频结束缩放手势')
+				return true
+			}
+		}
+		return false
+	}
+
+	// 角落缩放控制点处理
+	const handleScaleStart = (event) => {
+		if (!scaleMode.value) return
+
+		event.stopPropagation() // 阻止事件冒泡
+		event.preventDefault() // 阻止默认行为
+
+		showInteractionElements() // 显示交互元素
+
+		const touch = event.changedTouches?.[0] || event.touches?.[0]
+		if (!touch) return
+
+		// 🔧 修复角落检测：基于窗口自身位置而不是屏幕中心
+		const touchX = touch.screenX || touch.pageX || touch.clientX || 0
+		const touchY = touch.screenY || touch.pageY || touch.clientY || 0
+
+		// 获取窗口的实际位置和尺寸
+		const windowLeft = windowPosition.value.left
+		const windowTop = windowPosition.value.top
+		const windowWidth = windowPosition.value.width
+		const windowHeight = windowPosition.value.height
+
+		// 计算窗口的中心点
+		const windowCenterX = windowLeft + windowWidth / 2
+		const windowCenterY = windowTop + windowHeight / 2
+
+		// 基于窗口中心判断角落（而不是屏幕中心）
+		let corner = 'tl'
+		const isLeft = touchX < windowCenterX
+		const isTop = touchY < windowCenterY
+
+		if (isLeft && isTop) corner = 'tl'      // 左上角
+		else if (!isLeft && isTop) corner = 'tr'  // 右上角
+		else if (isLeft && !isTop) corner = 'bl'  // 左下角
+		else corner = 'br'                        // 右下角
+
+
+
+
+
+		cornerScaleData.value = {
+			startX: touchX,
+			startY: touchY,
+			corner: corner,
+			lastUpdateTime: Date.now(), // 上次更新时间
+			updateCount: 0 // 更新计数器
+		}
+
+
+	}
+
+	const handleScaleMove = (event) => {
+		if (!scaleMode.value || !cornerScaleData.value) return
+
+		event.stopPropagation()
+		event.preventDefault()
+
+		const touch = event.changedTouches?.[0] || event.touches?.[0]
+		if (!touch) return
+
+		const currentX = touch.screenX || touch.pageX || touch.clientX || 0
+		const currentY = touch.screenY || touch.pageY || touch.clientY || 0
+
+		// 计算从起始点的距离
+		const deltaX = currentX - cornerScaleData.value.startX
+		const deltaY = currentY - cornerScaleData.value.startY
+
+		// 极简算法：强力节流 + 简单计算
+		const corner = cornerScaleData.value.corner
+		const currentTime = Date.now()
+
+		// 强力节流：每100ms才更新一次，大幅减少闪动
+		const timeDiff = currentTime - cornerScaleData.value.lastUpdateTime
+		if (timeDiff < 100) {
+			return
+		}
+
+		// 每3次移动才处理一次，进一步减少频率
+		cornerScaleData.value.updateCount++
+		if (cornerScaleData.value.updateCount % 3 !== 0) {
+			return
+		}
+
+		// 使用已经定义的deltaX和deltaY变量
+		// 基于窗口实际位置的智能缩放计算
+		let widthChange = 0
+		let heightChange = 0
+
+		const sensitivity = 0.8 // 提高灵敏度，改善用户体验
+
+		// 🔧 真正基于窗口中心点的智能缩放逻辑：
+		// 计算窗口中心点位置
+		const windowCenterX = windowPosition.value.left + windowPosition.value.width / 2;
+		const windowCenterY = windowPosition.value.top + windowPosition.value.height / 2;
+
+		// 计算各个角相对于窗口中心的期望方向
+		let expectedDirectionX = 0; // 期望的X方向：-1向左，1向右
+		let expectedDirectionY = 0; // 期望的Y方向：-1向上，1向下
+
+		if (corner === 'tl') {
+			expectedDirectionX = -1; // 左上角应该向左
+			expectedDirectionY = -1; // 左上角应该向上
+		} else if (corner === 'tr') {
+			expectedDirectionX = 1;  // 右上角应该向右
+			expectedDirectionY = -1; // 右上角应该向上
+		} else if (corner === 'bl') {
+			expectedDirectionX = -1; // 左下角应该向左
+			expectedDirectionY = 1;  // 左下角应该向下
+		} else if (corner === 'br') {
+			expectedDirectionX = 1;  // 右下角应该向右
+			expectedDirectionY = 1;  // 右下角应该向下
+		}
+
+		// 判断实际拖拽方向是否与期望方向一致
+		const actualDirectionX = deltaX > 0 ? 1 : (deltaX < 0 ? -1 : 0);
+		const actualDirectionY = deltaY > 0 ? 1 : (deltaY < 0 ? -1 : 0);
+
+		// 计算方向一致性：一致为正（放大），不一致为负（缩小）
+		const directionConsistencyX = expectedDirectionX * actualDirectionX;
+		const directionConsistencyY = expectedDirectionY * actualDirectionY;
+
+		// 基于方向一致性计算缩放变化
+		widthChange = Math.abs(deltaX) * sensitivity * Math.sign(directionConsistencyX);
+		heightChange = Math.abs(deltaY) * sensitivity * Math.sign(directionConsistencyY);
+
+
+
+		// 最小变化阈值
+		const minChange = 15
+		if (Math.abs(widthChange) < minChange && Math.abs(heightChange) < minChange) {
+			return
+		}
+
+		cornerScaleData.value.lastUpdateTime = currentTime
+
+
+
+		// 通知父页面更新尺寸（非等比）
+		uni.$emit('localVideoResize', {
+			widthChange,
+			heightChange,
+			corner
+		})
+	}
+
+	const handleScaleEnd = (event) => {
+		if (!scaleMode.value) return
+
+		event.stopPropagation()
+
+		cornerScaleData.value = null
+	}
+
+	// 交互显示管理
+	const showInteractionElements = () => {
+		showInteraction.value = true
+
+		// 清除之前的定时器
+		if (interactionTimer.value) {
+			clearTimeout(interactionTimer.value)
+		}
+
+		// 8秒后隐藏交互元素
+		interactionTimer.value = setTimeout(() => {
+			showInteraction.value = false
+		}, 8000)
+	}
+
+	// 重置到默认大小和位置
+	const resetToDefault = () => {
+		console.log('重置本地视频到默认大小')
+		uni.$emit('localVideoReset')
+		isOverDefaultSize.value = false
+		showInteractionElements()
+	}
+
+	// 检查是否超过默认大小
+	const checkOverDefaultSize = (scale) => {
+		const wasOverSize = isOverDefaultSize.value
+		isOverDefaultSize.value = scale > 1.05 // 超过默认大小5%时就显示关闭按钮
+
+		if (wasOverSize !== isOverDefaultSize.value) {
+			console.log('本地视频大小状态变化:', { scale, isOverDefaultSize: isOverDefaultSize.value })
+		}
+	}
+
+	// 视图创建回调
+	const onLocalViewCreated = () => {
+		console.log('🎬 [localVideo] ✅ Zego本地视图已创建');
+
+		// 确保预览绑定到新创建的视图
+		setTimeout(() => {
+			if (engine.value) {
+				console.log('🎬 [localVideo] 重新绑定预览到视图组件');
+				engine.value.startPreview().then(() => {
+					isPreviewActive.value = true;
+					console.log('🎬 [localVideo] 预览重新绑定成功');
+				}).catch(error => {
+					console.log('🎬 [localVideo] 重新绑定预览失败:', error.message);
+					// 如果失败，可能是因为预览已经在运行
+				});
+			}
+		}, 100);
+	};
+
+	// 视图销毁回调
+	const onLocalViewDestroyed = () => {
+		console.log('🎬 [localVideo] ❌ Zego本地视图已销毁');
+		isPreviewActive.value = false; // 重置预览状态
+	};
+
+	// 初始化时显示交互元素
+	onMounted(() => {
+		console.log('本地视频组件已挂载，拖拽模式:', dragMode.value, '缩放模式:', scaleMode.value)
+		showInteractionElements();
+		isPageActive.value = true;
+	});
+
+	// 页面生命周期管理
+	onUnmounted(() => {
+		console.log('🎬 [localVideo] 组件卸载，清理资源');
+		isPageActive.value = false;
+		isPreviewActive.value = false;
+		initializationInProgress.value = false;
+	});
+</script>
+
+<style>
+	.video-container {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+	}
+
+	.voice {
+		position: absolute;
+		top: 0;
+		right: 26rpx;
+		width: 16rpx; /* 视觉大小保持小巧 */
+		height: 30rpx;
+		z-index: 100; /* 确保在最上层 */
+		/* 扩大点击区域的技巧 */
+		display: flex;
+		justify-content: center;
+		align-items: center;
+	}
+
+	/* 关闭按钮样式 */
+	.close-button {
+		position: absolute;
+		top: 5px;
+		left: 50%;
+		transform: translateX(-50%);
+		background-color: rgba(0, 0, 0, 0.8);
+		border-radius: 15px;
+		padding: 5px 15px;
+		z-index: 20;
+	}
+
+	.close-text {
+		color: #ffffff;
+		font-size: 12px;
+	}
+
+
+
+	/* 中心拖拽十字箭头 - 安卓兼容版本 */
+	.drag-center {
+		position: absolute;
+		top: 0px;
+		left: 0px;
+		right: 0px;
+		bottom: 0px;
+		z-index: 15;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.drag-line {
+		position: absolute;
+		background-color: #00BFFF;
+		opacity: 0.8;
+	}
+
+	.drag-line-h {
+		top: 18px;
+		left: 4px;
+		width: 32px;
+		height: 4px;
+	}
+
+	.drag-line-v {
+		left: 18px;
+		top: 4px;
+		width: 4px;
+		height: 32px;
+	}
+
+	/* 十字箭头容器 */
+	.drag-cross-container {
+		position: relative;
+		width: 36px;
+		height: 36px;
+	}
+
+	/* 四角缩放控制点样式 - 直接定位版本 */
+
+	.scale-corner {
+		position: absolute;
+		width: 48px;
+		height: 48px;
+		z-index: 15;
+	}
+
+	.scale-corner-tl {
+		top: -20px;  /* 调整为40x40px的中心对齐 */
+		left: -20px;
+	}
+
+	.scale-corner-tr {
+		top: -25px;
+		right: -25px;
+	}
+
+	.scale-corner-bl {
+		bottom: -20px;
+		left: -20px;
+	}
+
+	.scale-corner-br {
+		bottom: -20px;
+		right: -20px;
+	}
+
+	.corner-lines {
+		position: relative;
+		width: 100%;
+		height: 100%;
+	}
+
+	.corner-line {
+		position: absolute;
+		opacity: 1.0;
+		border-radius: 3px;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+	}
+
+	.corner-line-h {
+		width: 28px;
+		height: 5px;
+	}
+
+	.corner-line-v {
+		width: 5px;
+		height: 28px;
+	}
+
+	/* 左上角线条位置 - 在40x40容器中居中 */
+	.scale-corner-tl .corner-line-h {
+		top: 18px;   /* 40px容器的中心位置 */
+		left: 10px;
+	}
+
+	.scale-corner-tl .corner-line-v {
+		top: 10px;
+		left: 18px;
+	}
+
+	/* 右上角线条位置 - 在40x40容器中居中 */
+	.scale-corner-tr .corner-line-h {
+		top: 18px;
+		right: 10px;
+	}
+
+	.scale-corner-tr .corner-line-v {
+		top: 10px;
+		right: 18px;
+	}
+
+	/* 左下角线条位置 - 在40x40容器中居中 */
+	.scale-corner-bl .corner-line-h {
+		bottom: 18px;
+		left: 10px;
+	}
+
+	.scale-corner-bl .corner-line-v {
+		bottom: 10px;
+		left: 18px;
+	}
+
+	/* 右下角线条位置 - 在40x40容器中居中 */
+	.scale-corner-br .corner-line-h {
+		bottom: 18px;
+		right: 10px;
+	}
+
+	.scale-corner-br .corner-line-v {
+		bottom: 10px;
+		right: 18px;
+	}
+
+	/* 透明状态 */
+	.transparent {
+		opacity: 0.1;
+	}
+
+	/* 调试用的四角测试点 */
+	.debug-corner {
+		position: absolute;
+		width: 20px;
+		height: 20px;
+		background-color: #00FF00;
+		border-radius: 10px;
+		z-index: 50;
+	}
+
+	.debug-corner-tl {
+		top: -10px;
+		left: -10px;
+	}
+
+	.debug-corner-tr {
+		top: -10px;
+		right: -10px;
+	}
+
+	.debug-corner-bl {
+		bottom: -10px;
+		left: -10px;
+	}
+
+	.debug-corner-br {
+		bottom: -10px;
+		right: -10px;
+	}
+</style>

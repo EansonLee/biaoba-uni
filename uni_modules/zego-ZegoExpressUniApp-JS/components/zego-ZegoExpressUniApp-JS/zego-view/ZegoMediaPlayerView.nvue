@@ -1,0 +1,36 @@
+<template>
+	<ZegoExpress-Mediaplayer-View :playerID="playerID" :canvasType="canvasType" :alphaBlend="alphaBlend" :viewMode="viewMode"></ZegoExpress-Mediaplayer-View>
+</template>
+
+<script>
+	import {
+		ZegoPublishChannel,
+		ZegoViewMode
+	} from '../lib/ZegoExpressDefines';
+
+	export default {
+		name: 'ZegoMediaplayerView',
+		props: {
+			viewMode: {
+				type: Number,
+				default: ZegoViewMode.AspectFit
+			},
+			playerID: {
+				type: Number,
+				default: undefined
+			},
+			canvasType: {
+				type: Number,
+				default: 0
+			},
+			alphaBlend: {
+				type: Boolean,
+				default: false
+			}
+		},
+	}
+</script>
+
+<style>
+
+</style>

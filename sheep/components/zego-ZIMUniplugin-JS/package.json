@@ -1,0 +1,24 @@
+{
+    "id": "zego-ZIMUniplugin-JS",
+    "name": "Zego ZIM 即时通讯原生插件（JS 封装层）",
+    "displayName": "Zego ZIM 即时通讯原生插件（JS 封装层）",
+    "version": "2.18.2",
+    "description": "Zego ZIM 即时通讯原生插件的 JS 封装层，用于与 ZIM uni-app SDK 搭配使用。",
+    "keywords": [
+        "zego",
+        "zim",
+        "即时通讯",
+        "即构"
+    ],
+    "dcloudext": {
+        "type": "js_sdk",
+        "sale": {
+            "regular": {
+                "price": "0.00"
+            },
+            "sourcecode": {
+                "price": "0.00"
+            }
+        }
+    }
+}

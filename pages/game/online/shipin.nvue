@@ -1,0 +1,135 @@
+<template>
+	<div>
+		
+		<!-- 预览本地 -->
+		<view>
+		<!-- #ifdef APP-PLUS -->
+		
+		  <zego-local-view  style="height: 403.84rpx;flex: 1;"></zego-local-view>
+		  <!-- #endif -->
+		  <!-- #ifdef H5 -->
+		  <video id="local_video" style="height: 403.84rpx;flex: 1;"  autoplay playsinline :muted="true"></video>
+		  <!-- #endif -->
+		  </view>
+		  
+		  <!-- 拉流 -->
+		  <view >
+		   <!-- #ifdef APP-PLUS -->
+		      <zego-remote-view :streamID="state.playStreamID" style="height: 403.84rpx;flex: 1"></zego-remote-view>
+		      <!-- #endif -->
+		      <!-- #ifdef H5 -->
+		      <video id="remote_video" style="height: 403.84rpx;flex: 1;"  autoplay playsinline :muted="true"></video>
+		      <!-- #endif -->
+			  </view> 
+	</div>
+	
+</template>
+
+<script setup>
+	import { ref,reactive, onMounted, onUnmounted } from "vue"
+    import ZegoRemoteView from "@/uni_modules/zego-ZegoExpressUniApp-JS/components/zego-ZegoExpressUniApp-JS/zego-view/ZegoRemoteView";
+    import ZegoLocalView from "@/uni_modules/zego-ZegoExpressUniApp-JS/components/zego-ZegoExpressUniApp-JS/zego-view/ZegoLocalView";
+	import ZegoExpressEngine from '@/uni_modules/zego-ZegoExpressUniApp-JS/components/zego-ZegoExpressUniApp-JS/lib/ZegoExpressEngine';
+	import permision from "@/composables/permission.js";
+	import {useZego} from "@/composables/useZego";
+	import {usePublish} from "@/composables/usePublish";
+	import {usePlay} from "@/composables/usePlay";
+	import keyCenter from "@/composables/KeyCenter.js";
+	const {
+		info,
+		logHeight,
+		roomID,
+		userID,
+		userName,
+		isLogin,
+		isRequest,
+		engine,
+		// 方法
+		createEngine, 
+		destroyEngine,
+		loginRoom,
+		logoutRoom,
+		changeLogViewSize,
+		appendActionInfo,
+		appendSuccessInfo,
+		appendFailureInfo,
+		appendCallbackInfo
+	}  = useZego()
+	const {
+		publishStreamID,
+		publishBtnName,
+		isPublishingStream,
+		localVideoElem,
+		pubVideoMuted,
+		startPublishingStream,
+		stopPublishingStream,
+		startPreview,
+		stopPreview,
+		onClickPublish,
+		addPublishListeners,
+	} = usePublish({
+		engine, 
+		appendActionInfo,
+		appendCallbackInfo,
+		appendSuccessInfo
+	})
+	const {
+		playStreamID,
+		playVideoElem,
+		isPlayingStream,
+		playBtnName,
+		playVideoMuted,
+		playStream,
+		onClickPlay,
+		startPlayingStream,
+		stopPlayingStream,
+		addPlayListeners,
+		playError
+	} = usePlay({
+		engine,
+		appendActionInfo,
+		appendCallbackInfo,
+		appendSuccessInfo
+	})
+	const userInfo =uni.getStorageSync('userInfo');
+	const state = reactive({
+		playStreamID: userInfo.playerName + "_" + userInfo.playerOnly
+	});
+
+	
+	onMounted(async () => {
+		init()
+		// #ifdef APP-PLUS
+		if (uni.getSystemInfoSync().platform === "android") {
+			await permision.requestAndroidPermission(
+				"android.permission.RECORD_AUDIO"
+			);
+			await permision.requestAndroidPermission(
+				"android.permission.CAMERA"
+			);
+		}
+		// #endif
+		// #ifdef H5
+		localVideoElem.value = document.querySelector("#local_video video");
+		playVideoElem.value = document.querySelector("#remote_video video");
+		// #endif
+	})
+	
+ 
+	const init = async () => {
+		// 呼叫邀请配置
+		// 采用通用场景
+		keyCenter.setToken(uni.getStorageSync('zeGoToken'));
+		await createEngine() //创建引擎
+		await loginRoom("0919878",userInfo.playerOnly,userInfo.playerName) //开始登录房间
+		await startPreview() //开始预览
+		await startPublishingStream(state.playStreamID) //开始推流
+		await startPlayingStream(state.playStreamID) //开始拉
+	}
+
+	onUnmounted(() => {
+		console.log("ymxz----------")
+		/** 销毁引擎 */
+		// ZegoExpressEngine.destroyEngine();
+	})
+</script>

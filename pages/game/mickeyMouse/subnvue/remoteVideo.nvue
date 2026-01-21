@@ -1,0 +1,1057 @@
+<template>
+	<view
+		class="video-container"
+		@touchstart="handleTouchStart"
+		@touchmove="handleTouchMove"
+		@touchend="handleTouchEnd"
+	>
+		<!-- #ifdef APP-PLUS -->
+		<zego-remote-view v-if="sid" :streamID="sid" style="flex: 1;"></zego-remote-view>
+		<!-- #endif -->
+
+		<view class="voice" @click="voice">
+		<image style="width: 16rpx;height: 16rpx; " :src="'/static/images/video/voice-'+(voiceDisable?'close':'open')+'.png'" mode="widthFix" ></image>
+		</view>
+
+		<!-- 关闭按钮 - 仅在超过默认大小时显示 -->
+		<view v-if="isOverDefaultSize" class="close-button" @click="resetToDefault">
+			<text class="close-text">关闭</text>
+		</view>
+
+		<!-- 四角缩放控制点 - 直接定位，与绿色测试点使用相同坐标系 -->
+		<!-- 左上角 -->
+		<view class="scale-corner scale-corner-tl" :class="{ 'transparent': !showInteraction }"
+			@touchstart="handleScaleStart"
+			@touchmove="handleScaleMove"
+			@touchend="handleScaleEnd">
+			<view class="corner-line corner-line-h"></view>
+			<view class="corner-line corner-line-v"></view>
+		</view>
+
+		<!-- 右上角 -->
+		<view class="scale-corner scale-corner-tr" :class="{ 'transparent': !showInteraction }"
+			@touchstart="handleScaleStart"
+			@touchmove="handleScaleMove"
+			@touchend="handleScaleEnd">
+			<view class="corner-line corner-line-h"></view>
+			<view class="corner-line corner-line-v"></view>
+		</view>
+
+		<!-- 左下角 -->
+		<view class="scale-corner scale-corner-bl" :class="{ 'transparent': !showInteraction }"
+			@touchstart="handleScaleStart"
+			@touchmove="handleScaleMove"
+			@touchend="handleScaleEnd">
+			<view class="corner-line corner-line-h"></view>
+			<view class="corner-line corner-line-v"></view>
+		</view>
+
+		<!-- 右下角 -->
+		<view class="scale-corner scale-corner-br" :class="{ 'transparent': !showInteraction }"
+			@touchstart="handleScaleStart"
+			@touchmove="handleScaleMove"
+			@touchend="handleScaleEnd">
+			<view class="corner-line corner-line-h"></view>
+			<view class="corner-line corner-line-v"></view>
+		</view>
+	</view>
+</template>
+
+<script setup>
+	import {
+		ref,
+		reactive,
+		onMounted,
+		onUnmounted
+	} from "vue"
+	import {
+		onUnload
+	} from '@dcloudio/uni-app';
+	import ZegoExpressEngine, {
+		ZegoOrientation,
+		ZegoUpdateType
+	} from '@/uni_modules/zego-ZegoExpressUniApp-JS/components/zego-ZegoExpressUniApp-JS/lib/ZegoExpressEngine';
+	import {
+		useZego
+	} from "@/composables/useZego";
+	import {
+		usePublish
+	} from "@/composables/usePublish";
+	import {
+		usePlay
+	} from "@/composables/usePlay";
+	import keyCenter from "@/composables/KeyCenter.js";
+	import ZegoRemoteView from "@/uni_modules/zego-ZegoExpressUniApp-JS/components/zego-ZegoExpressUniApp-JS/zego-view/ZegoRemoteView";
+	const {
+		info,
+		logHeight,
+		userID,
+		userName,
+		isLogin,
+		isRequest,
+		engine,
+		// 方法
+		createEngine,
+		loginRoom,
+		logoutRoom,
+		changeLogViewSize,
+		appendActionInfo,
+		appendSuccessInfo,
+		appendFailureInfo,
+		appendCallbackInfo
+	} = useZego()
+	const {
+		publishStreamID,
+		publishBtnName,
+		isPublishingStream,
+		localVideoElem,
+		pubVideoMuted,
+		startPublishingStream,
+		stopPublishingStream,
+		startPreview,
+		stopPreview,
+		onClickPublish,
+		addPublishListeners,
+	} = usePublish({
+		engine,
+		appendActionInfo,
+		appendCallbackInfo,
+		appendSuccessInfo
+	})
+	const {
+		playStreamID,
+		playVideoElem,
+		isPlayingStream,
+		playBtnName,
+		playVideoMuted,
+		playStream,
+		onClickPlay,
+		startPlayingStream,
+		stopPlayingStream,
+		addPlayListeners,
+		playError
+	} = usePlay({
+		engine,
+		appendActionInfo,
+		appendCallbackInfo,
+		appendSuccessInfo
+	})
+	const userInfo = uni.getStorageSync('userInfo');
+	const sid = uni.getStorageSync('remoteUserId');
+
+	// 页面状态管理
+	const isPageActive = ref(true);
+	const initializationInProgress = ref(false);
+	const isPlayingActive = ref(false); // 播放状态追踪
+
+	// 拖拽相关状态 - 默认开启
+	const dragMode = ref(true)
+	const dragData = ref(null)
+	const voiceDisable = ref(false)
+
+	// 缩放相关状态 - 默认开启
+	const scaleMode = ref(true)
+	const scaleData = ref(null)
+	const initialDistance = ref(0)
+	const cornerScaleData = ref(null)
+
+	// 交互显示状态
+	const showInteraction = ref(true)
+	const interactionTimer = ref(null)
+
+	// 默认大小状态
+	const isOverDefaultSize = ref(false)
+	const defaultSize = { width: 146, height: 64 } // rpx单位
+
+	// 窗口位置信息（用于修复缩放方向问题）
+	const windowPosition = ref({
+		left: 0,
+		top: 0,
+		width: 146,
+		height: 64,
+		screenWidth: 375,
+		screenHeight: 667
+	})
+	onMounted(async () => {
+		// 检查是否为线上对战模式
+		const gameSettings = uni.getStorageSync('currentGameSettings');
+		console.log('🎬 [remoteVideo] 游戏设置检查:', gameSettings);
+		if (!gameSettings || gameSettings.type !== 11) {
+			console.log('🎬 [remoteVideo] 非线上对战模式，跳过远程视频初始化。当前模式:', gameSettings?.type);
+			return;
+		}
+		console.log('🎬 [remoteVideo] 确认为线上对战模式，继续远程视频初始化');
+
+	// 智能重试机制
+	const maxRetryAttempts = 3;
+	const retryDelay = 1000; // 1秒
+	let currentRetryAttempt = 0;
+	
+	const retryInitialization = () => {
+		if (currentRetryAttempt >= maxRetryAttempts) {
+			console.error('🎬 [remoteVideo] 已达到最大重试次数，初始化失败');
+			uni.showToast({
+				title: '远程视频初始化失败，请重新进入游戏',
+				icon: 'none',
+				duration: 3000
+			});
+			return false;
+		}
+		
+		currentRetryAttempt++;
+		console.log(`🎬 [remoteVideo] 开始第${currentRetryAttempt}次重试...`);
+		
+		// 重试前尝试修复Token
+		const app = getApp();
+		if (app && typeof app.checkTokenIntegrityOnResume === 'function') {
+			app.checkTokenIntegrityOnResume();
+		}
+		if (app && typeof app.restoreRemoteVideoData === 'function') {
+			app.restoreRemoteVideoData();
+		}
+		
+		setTimeout(() => {
+			performDataCheck();
+		}, retryDelay * currentRetryAttempt); // 递增延迟
+		
+		return true;
+	};
+	
+	const performDataCheck = () => {
+		// 使用全局数据检查功能
+		uni.$emit('check-remote-video-data', (result) => {
+			console.log(`🎬 [remoteVideo] 第${currentRetryAttempt || 1}次数据检查结果:`, result);
+			
+			if (!result.isComplete) {
+				let missingItems = [];
+				if (result.missingData.roomId) missingItems.push('房间ID');
+				if (result.missingData.remoteUserId) missingItems.push('远程用户ID');
+				if (result.missingData.zeGoTokenThird) missingItems.push('Zego Token');
+				
+				console.error('🎬 [remoteVideo] ❌ 数据不完整，缺少:', missingItems.join('、'));
+				
+				// 尝试重试
+				if (!retryInitialization()) {
+					uni.showToast({
+						title: `远程视频初始化数据不完整，缺少：${missingItems.join('、')}`,
+						icon: 'none',
+						duration: 5000
+					});
+				}
+				return;
+			}
+			
+			console.log('🎬 [remoteVideo] ✅ 数据检查通过，开始初始化');
+			currentRetryAttempt = 0; // 重置重试计数
+			isPageActive.value = true;
+			init();
+		});
+	};
+
+		// 使用全局数据检查功能
+		performDataCheck();
+	})
+
+	const init = async () => {
+		// 防止重复初始化
+		if (initializationInProgress.value) {
+			console.log('🎬 [remoteVideo] 初始化正在进行中，跳过重复调用');
+			return;
+		}
+
+		// 检查页面是否仍然活跃
+		if (!isPageActive.value) {
+			console.log('🎬 [remoteVideo] 页面已不活跃，取消初始化');
+			return;
+		}
+
+		initializationInProgress.value = true;
+
+		try {
+			console.log('🎬 [remoteVideo] ===== 开始远程视频初始化 =====');
+			const roomId = uni.getStorageSync('roomID');
+			const zeGoTokenThird = uni.getStorageSync('zeGoTokenThird');
+
+			console.log('🎬 [remoteVideo] 最终存储数据检查:', {
+				roomId: roomId ? '已获取' : '未获取',
+				sid: sid ? '已获取' : '未获取',
+				zeGoTokenThird: zeGoTokenThird ? '已获取' : '未获取'
+			});
+
+			if (!roomId || !sid || !zeGoTokenThird) {
+				console.error('🎬 [remoteVideo] 缺少必要的存储数据');
+				uni.showToast({
+					title: '远程视频初始化数据不完整',
+					icon: 'none',
+					duration: 3000
+				});
+				return;
+			}
+
+			keyCenter.setToken(zeGoTokenThird);
+			console.log('🎬 [remoteVideo] Token设置完成');
+
+			// 如果引擎还未创建，则创建引擎
+			if (!engine.value) {
+				console.log('🎬 [remoteVideo] 开始创建Zego引擎...');
+				await createEngine()
+				console.log('🎬 [remoteVideo] Zego引擎创建完成');
+			} else {
+				console.log('🎬 [remoteVideo] Zego引擎已存在，跳过创建');
+			}
+
+			console.log('🎬 [remoteVideo] 开始登录房间...', {
+				roomId,
+				userID: userInfo.playerOnly + "-third",
+				userName: userInfo.playerName + "-third"
+			});
+
+			// 网络环境检查和重试机制
+			let loginSuccess = false;
+			for (let attempt = 1; attempt <= 3; attempt++) {
+				try {
+					console.log(`🎬 [remoteVideo] 登录尝试 ${attempt}/3`);
+					await Promise.race([
+						loginRoom(roomId, userInfo.playerOnly + "-third", userInfo.playerName + "-third"),
+						new Promise((_, reject) => setTimeout(() => reject(new Error('登录超时')), 10000))
+					]);
+					loginSuccess = true;
+					console.log('🎬 [remoteVideo] 房间登录完成');
+					break;
+				} catch (loginError) {
+					console.log(`🎬 [remoteVideo] 登录尝试 ${attempt} 失败:`, loginError.message);
+					if (attempt < 3) {
+						console.log(`🎬 [remoteVideo] 等待 ${attempt * 2}s 后重试...`);
+						await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+					}
+				}
+			}
+
+			if (!loginSuccess) {
+				throw new Error('房间登录失败，请检查网络连接');
+			}
+
+			// 🎵 配置回音消除 - 解决重音问题（米奇远程端）
+			try {
+				// 远程端主要配置播放相关的音频处理
+				await engine.value.setAudioRouteToSpeaker(true);
+
+			} catch (audioError) {
+				console.error('❌ [回音消除-米奇远程] 音频配置失败:', audioError);
+				// 不阻断流程，继续执行
+			}
+
+			// 添加播放监听器
+			addPlayListeners();
+			console.log('🎬 [remoteVideo] 播放监听器已添加');
+
+			// 设置事件监听器
+			setupEventListeners();
+
+			// iOS设备特定处理
+			await handleIOSVideoIssue();
+
+			// 开始播放远程流，增加重试机制
+			console.log('🎬 [remoteVideo] 开始播放远程流...', { streamID: sid });
+			let playSuccess = false;
+			for (let attempt = 1; attempt <= 3; attempt++) {
+				try {
+					console.log(`🎬 [remoteVideo] 播放尝试 ${attempt}/3`);
+					await startPlayingStream(sid);
+					isPlayingActive.value = true;
+					playSuccess = true;
+					console.log('🎬 [remoteVideo] ✅ 远程流播放成功');
+					break;
+				} catch (playError) {
+					console.log(`🎬 [remoteVideo] 播放尝试 ${attempt} 失败:`, playError.message);
+					if (attempt < 3) {
+						console.log(`🎬 [remoteVideo] 等待 ${attempt}s 后重试...`);
+						await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+					}
+				}
+			}
+
+			if (!playSuccess) {
+				console.error('🎬 [remoteVideo] ❌ 远程流播放失败，可能对方还未开始推流');
+				uni.showToast({
+					title: '远程视频连接失败，请稍后重试',
+					icon: 'none',
+					duration: 3000
+				});
+			}
+
+			console.log('🎬 [remoteVideo] ===== 远程视频初始化完成 =====');
+
+		} catch (error) {
+			console.error('🎬 [remoteVideo] init 失败:', error);
+			console.error('🎬 [remoteVideo] 错误详情:', {
+				message: error.message,
+				stack: error.stack,
+				name: error.name
+			});
+			uni.showToast({
+				title: '远程视频初始化失败: ' + error.message,
+				icon: 'none',
+				duration: 3000
+			});
+		} finally {
+			initializationInProgress.value = false;
+		}
+	}
+
+	// iOS设备特定处理
+	const handleIOSVideoIssue = async () => {
+		const systemInfo = uni.getSystemInfoSync();
+
+		// 针对特定iOS版本或设备型号的处理
+		if (systemInfo.platform === 'ios') {
+			// 根据iOS版本调整延迟时间
+			const iosVersion = parseFloat(systemInfo.system.replace('iOS ', ''));
+			const delayTime = iosVersion < 14 ? 2000 : 1000; // 老版本iOS需要更长延迟
+
+			await new Promise(resolve => setTimeout(resolve, delayTime));
+
+			// 检查播放状态，如果需要则重新启动
+			if (engine.value && isPlayingActive.value) {
+				try {
+					// 先停止再启动播放，确保流正确绑定到视图
+					await stopPlayingStream(sid);
+					await new Promise(resolve => setTimeout(resolve, 500)); // 短暂延迟
+					await startPlayingStream(sid);
+				} catch (error) {
+					// 备用方案：多次重试
+					for (let i = 0; i < 3; i++) {
+						try {
+							await new Promise(resolve => setTimeout(resolve, 500));
+							await startPlayingStream(sid);
+							break;
+						} catch (retryError) {
+							// 继续重试
+						}
+					}
+				}
+			}
+		}
+	};
+
+	// 添加事件监听器
+	const setupEventListeners = () => {
+		uni.$on('stopRemoteVideo', async (e) => {
+			try {
+				// 🔧 停止远程视频时的完整清理（米奇模式）
+				await stopPlayingStream(sid);
+				isPlayingActive.value = false;
+
+				// 退出房间
+				const roomId = uni.getStorageSync('roomID');
+				if (engine.value && roomId) {
+					await logoutRoom(roomId);
+				}
+			} catch (error) {
+				console.error('停止远程视频时出错:', error);
+			}
+		});
+
+		uni.$on('resize', async (e) => {
+			if (engine.value) {
+				engine.value.setAppOrientation(e);
+			}
+		});
+
+		// 监听远程流状态变化
+		uni.$on('remoteStreamStateChanged', (data) => {
+			if (data.streamID === sid) {
+				if (data.state === 'PLAYING') {
+					isPlayingActive.value = true;
+				} else if (data.state === 'NO_PLAY') {
+					isPlayingActive.value = false;
+				}
+			}
+		});
+
+		// 监听授权完成事件，重新尝试初始化
+		uni.$on('auth-completed-restart-video', () => {
+			console.log('🎬 [remoteVideo] 收到授权完成事件，检查是否需要重新初始化');
+			if (!isPlayingActive.value && isPageActive.value) {
+				console.log('🎬 [remoteVideo] 授权完成后重新初始化远程视频');
+				setTimeout(() => {
+					init();
+				}, 500);
+			}
+		});
+	};
+
+	// 初始化时显示交互元素
+	onMounted(() => {
+		showInteractionElements();
+		isPageActive.value = true;
+	});
+
+	// 页面生命周期管理
+	onUnmounted(() => {
+		isPageActive.value = false;
+		isPlayingActive.value = false;
+		initializationInProgress.value = false;
+	});
+
+	onUnload(async () => {
+		try {
+			// 🔧 混合模式兼容：页面卸载时只销毁引擎，不断开连接（米奇远程）
+			// 因为混合模式的"下一局"会重新启动页面，但不应该断开语音连接
+			// 真正的断开连接通过 stopRemoteVideo 事件处理
+
+			isPageActive.value = false;
+			initializationInProgress.value = false;
+			isPlayingActive.value = false;
+
+			ZegoExpressEngine.destroyEngine();
+
+		} catch (error) {
+			// 确保即使出错也要销毁引擎
+			isPlayingActive.value = false;
+			ZegoExpressEngine.destroyEngine();
+		}
+	})
+
+	// 🎵 简化的音频控制函数 - 回到原有方案
+	const voice = () => {
+		voiceDisable.value = !voiceDisable.value;
+		if (engine.value && sid) {
+			engine.value.mutePlayStreamAudio(sid, voiceDisable.value);
+		}
+		console.log(`🔊 [mickeyRemoteVideo] 远程音频已${voiceDisable.value ? '关闭' : '开启'}`);
+	}
+
+	// 拖拽事件处理
+	const handleTouchStart = (event) => {
+		showInteractionElements() // 显示交互元素
+
+		// 检查是否点击在特殊元素上（包括子元素）
+		const target = event.target || event.currentTarget
+		let currentElement = target
+
+		// 向上遍历DOM树，检查是否在特殊控制点内
+		while (currentElement && currentElement !== event.currentTarget) {
+			if (currentElement.classList && (
+				currentElement.classList.contains('scale-corner') ||
+				currentElement.classList.contains('corner-line') ||
+				currentElement.classList.contains('voice') // 🎵 添加音频按钮检查
+			)) {
+				console.log('点击在特殊控制元素上，不处理拖拽')
+				return // 如果点击在特殊控制元素上，不处理拖拽
+			}
+			currentElement = currentElement.parentElement
+		}
+
+		// 如果正在进行角落缩放，不处理拖拽
+		if (cornerScaleData.value) {
+			console.log('正在进行角落缩放，不处理拖拽')
+			return
+		}
+
+		// 移除双指缩放功能，简化操作体验
+		// 双指缩放已禁用，专注于四角拖拽缩放
+
+		if (!dragMode.value) return
+
+		console.log('远程视频开始拖拽', event);
+		// nvue中使用changedTouches而不是touches
+		let touch = null;
+		if (event.changedTouches && event.changedTouches.length > 0) {
+			touch = event.changedTouches[0];
+		} else if (event.touches && event.touches.length > 0) {
+			touch = event.touches[0];
+		}
+
+		if (!touch) {
+			console.error('无法获取触摸点信息', event);
+			return;
+		}
+
+		dragData.value = {
+			startX: touch.screenX || touch.pageX || touch.clientX || 0,
+			startY: touch.screenY || touch.pageY || touch.clientY || 0,
+			startTime: Date.now(),
+			lastX: touch.screenX || touch.pageX || touch.clientX || 0,
+			lastY: touch.screenY || touch.pageY || touch.clientY || 0
+		}
+		console.log('远程视频拖拽数据初始化:', dragData.value);
+	}
+
+	const handleTouchMove = (event) => {
+		// 如果是缩放模式，优先处理双指缩放手势
+		if (scaleMode.value && event.changedTouches && event.changedTouches.length >= 2) {
+			if (handleScaleGesture(event)) return
+		}
+
+		if (!dragMode.value || !dragData.value) return
+
+		event.preventDefault()
+		// nvue中使用changedTouches而不是touches
+		let touch = null;
+		if (event.changedTouches && event.changedTouches.length > 0) {
+			touch = event.changedTouches[0];
+		} else if (event.touches && event.touches.length > 0) {
+			touch = event.touches[0];
+		}
+
+		if (!touch) {
+			console.error('handleTouchMove: 无法获取触摸点信息');
+			return;
+		}
+
+		const currentX = touch.screenX || touch.pageX || touch.clientX || 0
+		const currentY = touch.screenY || touch.pageY || touch.clientY || 0
+
+		// 计算相对于上一次位置的增量
+		const deltaX = currentX - dragData.value.lastX
+		const deltaY = currentY - dragData.value.lastY
+
+		// 更新最后位置
+		dragData.value.lastX = currentX
+		dragData.value.lastY = currentY
+
+		console.log('远程视频拖拽移动', { deltaX, deltaY, currentX, currentY });
+
+		// 通知父页面更新位置
+		uni.$emit('remoteVideoMove', { deltaX, deltaY })
+	}
+
+	const handleTouchEnd = (event) => {
+		// 移除双指缩放功能，简化操作体验
+
+		if (!dragMode.value) return
+		console.log('远程视频结束拖拽');
+		dragData.value = null
+	}
+
+	// 监听拖拽模式切换
+	uni.$on('remoteDragModeChange', (enabled) => {
+		dragMode.value = enabled
+	})
+
+	// 监听关闭按钮状态变化和窗口位置更新
+	uni.$on('remoteVideoSizeChange', (data) => {
+		// 只有在明确传递isOverSize且不为false时才更新关闭按钮状态
+		if (data.hasOwnProperty('isOverSize') && data.isOverSize !== false) {
+			isOverDefaultSize.value = data.isOverSize
+		}
+		// 始终更新窗口位置信息
+		if (data.windowPosition) {
+			windowPosition.value = data.windowPosition
+		}
+	})
+
+	// 监听缩放模式切换
+	uni.$on('remoteScaleModeChange', (enabled) => {
+		scaleMode.value = enabled
+		console.log('远程视频缩放模式切换:', enabled)
+	})
+
+	// 计算两点间距离
+	const getDistance = (touch1, touch2) => {
+		const dx = touch1.screenX - touch2.screenX
+		const dy = touch1.screenY - touch2.screenY
+		return Math.sqrt(dx * dx + dy * dy)
+	}
+
+	// 处理缩放手势（双指）
+	const handleScaleGesture = (event) => {
+		if (!scaleMode.value) return false
+
+		if (event.changedTouches && event.changedTouches.length >= 2) {
+			const touch1 = event.changedTouches[0]
+			const touch2 = event.changedTouches[1]
+			const distance = getDistance(touch1, touch2)
+
+			if (event.type === 'touchstart') {
+				initialDistance.value = distance
+				scaleData.value = {
+					startDistance: distance,
+					startScale: 1.0
+				}
+				console.log('远程视频开始缩放手势', { distance })
+				return true
+			} else if (event.type === 'touchmove' && scaleData.value) {
+				const scale = distance / scaleData.value.startDistance
+				const clampedScale = Math.max(0.5, Math.min(3.0, scale))
+
+				console.log('远程视频缩放手势移动', { distance, scale: clampedScale })
+
+				// 通知父页面更新缩放
+				uni.$emit('remoteVideoScale', { scale: clampedScale })
+				return true
+			} else if (event.type === 'touchend') {
+				scaleData.value = null
+				console.log('远程视频结束缩放手势')
+				return true
+			}
+		}
+		return false
+	}
+
+	// 角落缩放控制点处理
+	const handleScaleStart = (event) => {
+		if (!scaleMode.value) return
+
+		event.stopPropagation() // 阻止事件冒泡
+		event.preventDefault() // 阻止默认行为
+
+		showInteractionElements() // 显示交互元素
+
+		const touch = event.changedTouches?.[0] || event.touches?.[0]
+		if (!touch) return
+
+		// 🔧 修复角落检测：基于窗口自身位置而不是屏幕中心
+		const touchX = touch.screenX || touch.pageX || touch.clientX || 0
+		const touchY = touch.screenY || touch.pageY || touch.clientY || 0
+
+		// 获取窗口的实际位置和尺寸
+		const windowLeft = windowPosition.value.left
+		const windowTop = windowPosition.value.top
+		const windowWidth = windowPosition.value.width
+		const windowHeight = windowPosition.value.height
+
+		// 计算窗口的中心点
+		const windowCenterX = windowLeft + windowWidth / 2
+		const windowCenterY = windowTop + windowHeight / 2
+
+		// 基于窗口中心判断角落（而不是屏幕中心）
+		let corner = 'tl'
+		const isLeft = touchX < windowCenterX
+		const isTop = touchY < windowCenterY
+
+		if (isLeft && isTop) corner = 'tl'      // 左上角
+		else if (!isLeft && isTop) corner = 'tr'  // 右上角
+		else if (isLeft && !isTop) corner = 'bl'  // 左下角
+		else corner = 'br'                        // 右下角
+
+
+
+
+
+		cornerScaleData.value = {
+			startX: touchX,
+			startY: touchY,
+			corner: corner,
+			lastUpdateTime: Date.now(), // 上次更新时间
+			updateCount: 0 // 更新计数器
+		}
+
+
+	}
+
+	const handleScaleMove = (event) => {
+		if (!scaleMode.value || !cornerScaleData.value) return
+
+		event.stopPropagation()
+		event.preventDefault()
+
+		const touch = event.changedTouches?.[0] || event.touches?.[0]
+		if (!touch) return
+
+		const currentX = touch.screenX || touch.pageX || touch.clientX || 0
+		const currentY = touch.screenY || touch.pageY || touch.clientY || 0
+
+		// 计算从起始点的距离
+		const deltaX = currentX - cornerScaleData.value.startX
+		const deltaY = currentY - cornerScaleData.value.startY
+
+		// 极简算法：强力节流 + 简单计算
+		const corner = cornerScaleData.value.corner
+		const currentTime = Date.now()
+
+		// 强力节流：每100ms才更新一次，大幅减少闪动
+		const timeDiff = currentTime - cornerScaleData.value.lastUpdateTime
+		if (timeDiff < 100) {
+			return
+		}
+
+		// 每3次移动才处理一次，进一步减少频率
+		cornerScaleData.value.updateCount++
+		if (cornerScaleData.value.updateCount % 3 !== 0) {
+			return
+		}
+
+		// 使用已经定义的deltaX和deltaY变量
+		// 基于窗口实际位置的智能缩放计算
+		let widthChange = 0
+		let heightChange = 0
+
+		const sensitivity = 0.8 // 提高灵敏度，改善用户体验
+
+		// 🔧 真正基于窗口中心点的智能缩放逻辑：
+		// 计算窗口中心点位置
+		const windowCenterX = windowPosition.value.left + windowPosition.value.width / 2;
+		const windowCenterY = windowPosition.value.top + windowPosition.value.height / 2;
+
+		// 计算各个角相对于窗口中心的期望方向
+		let expectedDirectionX = 0; // 期望的X方向：-1向左，1向右
+		let expectedDirectionY = 0; // 期望的Y方向：-1向上，1向下
+
+		if (corner === 'tl') {
+			expectedDirectionX = -1; // 左上角应该向左
+			expectedDirectionY = -1; // 左上角应该向上
+		} else if (corner === 'tr') {
+			expectedDirectionX = 1;  // 右上角应该向右
+			expectedDirectionY = -1; // 右上角应该向上
+		} else if (corner === 'bl') {
+			expectedDirectionX = -1; // 左下角应该向左
+			expectedDirectionY = 1;  // 左下角应该向下
+		} else if (corner === 'br') {
+			expectedDirectionX = 1;  // 右下角应该向右
+			expectedDirectionY = 1;  // 右下角应该向下
+		}
+
+		// 判断实际拖拽方向是否与期望方向一致
+		const actualDirectionX = deltaX > 0 ? 1 : (deltaX < 0 ? -1 : 0);
+		const actualDirectionY = deltaY > 0 ? 1 : (deltaY < 0 ? -1 : 0);
+
+		// 计算方向一致性：一致为正（放大），不一致为负（缩小）
+		const directionConsistencyX = expectedDirectionX * actualDirectionX;
+		const directionConsistencyY = expectedDirectionY * actualDirectionY;
+
+		// 基于方向一致性计算缩放变化
+		widthChange = Math.abs(deltaX) * sensitivity * Math.sign(directionConsistencyX);
+		heightChange = Math.abs(deltaY) * sensitivity * Math.sign(directionConsistencyY);
+
+
+
+		// 最小变化阈值
+		const minChange = 15
+		if (Math.abs(widthChange) < minChange && Math.abs(heightChange) < minChange) {
+			return
+		}
+
+		cornerScaleData.value.lastUpdateTime = currentTime
+
+
+
+		// 通知父页面更新尺寸（非等比）
+		uni.$emit('remoteVideoResize', {
+			widthChange,
+			heightChange,
+			corner
+		})
+	}
+
+	const handleScaleEnd = (event) => {
+		if (!scaleMode.value) return
+
+		event.stopPropagation()
+		console.log('远程视频结束角落缩放')
+		cornerScaleData.value = null
+	}
+
+	// 交互显示管理
+	const showInteractionElements = () => {
+		showInteraction.value = true
+
+		// 清除之前的定时器
+		if (interactionTimer.value) {
+			clearTimeout(interactionTimer.value)
+		}
+
+		// 8秒后隐藏交互元素
+		interactionTimer.value = setTimeout(() => {
+			showInteraction.value = false
+		}, 8000)
+	}
+
+	// 重置到默认大小和位置
+	const resetToDefault = () => {
+		uni.$emit('remoteVideoReset')
+		isOverDefaultSize.value = false
+		showInteractionElements()
+	}
+
+	// 检查是否超过默认大小
+	const checkOverDefaultSize = (scale) => {
+		const wasOverSize = isOverDefaultSize.value
+		isOverDefaultSize.value = scale > 1.05 // 超过默认大小5%时就显示关闭按钮
+	}
+
+	// 初始化时显示交互元素
+	onMounted(() => {
+		showInteractionElements()
+	})
+</script>
+<style>
+	.video-container {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+	}
+
+	.voice {
+		position: absolute;
+		top: 0;
+		right: 26rpx;
+		width: 16rpx; /* 视觉大小保持小巧 */
+		height: 30rpx;
+		z-index: 100; /* 确保在最上层 */
+		/* 扩大点击区域的技巧 */
+		display: flex;
+		justify-content: center;
+		align-items: center;
+	}
+	/* 关闭按钮样式 */
+	.close-button {
+		position: absolute;
+		top: 5px;
+		left: 50%;
+		transform: translateX(-50%);
+		background-color: rgba(0, 0, 0, 0.8);
+		border-radius: 15px;
+		padding: 5px 15px;
+		z-index: 20;
+	}
+
+	.close-text {
+		color: #ffffff;
+		font-size: 12px;
+	}
+
+
+
+	/* 中心拖拽十字箭头 - 安卓兼容版本 */
+	.drag-center {
+		position: absolute;
+		top: 0px;
+		left: 0px;
+		right: 0px;
+		bottom: 0px;
+		z-index: 15;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+	}
+
+	.drag-line {
+		position: absolute;
+		background-color: #00BFFF;
+		opacity: 0.8;
+	}
+
+	.drag-line-h {
+		top: 18px;
+		left: 4px;
+		width: 32px;
+		height: 4px;
+	}
+
+	.drag-line-v {
+		left: 18px;
+		top: 4px;
+		width: 4px;
+		height: 32px;
+	}
+
+	/* 十字箭头容器 */
+	.drag-cross-container {
+		position: relative;
+		width: 36px;
+		height: 36px;
+	}
+
+	/* 四角缩放控制点样式 - 直接定位版本 */
+
+	.scale-corner {
+		position: absolute;
+		width: 48px;
+		height: 48px;
+		z-index: 15;
+	}
+
+	.scale-corner-tl {
+		top: -20px;  /* 调整为40x40px的中心对齐 */
+		left: -20px;
+	}
+
+	.scale-corner-tr {
+		top: -25px;
+		right: -25px;
+	}
+
+	.scale-corner-bl {
+		bottom: -20px;
+		left: -20px;
+	}
+
+	.scale-corner-br {
+		bottom: -20px;
+		right: -20px;
+	}
+
+	.corner-lines {
+		position: relative;
+		width: 100%;
+		height: 100%;
+	}
+
+	.corner-line {
+		position: absolute;
+		opacity: 1.0;
+		border-radius: 3px;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+	}
+
+	.corner-line-h {
+		width: 28px;
+		height: 5px;
+	}
+
+	.corner-line-v {
+		width: 5px;
+		height: 28px;
+	}
+
+	/* 左上角线条位置 - 在40x40容器中居中 */
+	.scale-corner-tl .corner-line-h {
+		top: 18px;   /* 40px容器的中心位置 */
+		left: 10px;
+	}
+
+	.scale-corner-tl .corner-line-v {
+		top: 10px;
+		left: 18px;
+	}
+
+	/* 右上角线条位置 - 在40x40容器中居中 */
+	.scale-corner-tr .corner-line-h {
+		top: 18px;
+		right: 10px;
+	}
+
+	.scale-corner-tr .corner-line-v {
+		top: 10px;
+		right: 18px;
+	}
+
+	/* 左下角线条位置 - 在40x40容器中居中 */
+	.scale-corner-bl .corner-line-h {
+		bottom: 18px;
+		left: 10px;
+	}
+
+	.scale-corner-bl .corner-line-v {
+		bottom: 10px;
+		left: 18px;
+	}
+
+	/* 右下角线条位置 - 在40x40容器中居中 */
+	.scale-corner-br .corner-line-h {
+		bottom: 18px;
+		right: 10px;
+	}
+
+	.scale-corner-br .corner-line-v {
+		bottom: 10px;
+		right: 18px;
+	}
+
+	/* 透明状态 */
+	.transparent {
+		opacity: 0.1;
+	}
+</style>

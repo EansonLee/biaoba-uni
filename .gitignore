@@ -1,0 +1,20 @@
+node_modules
+.DS_Store
+dist
+dist-ssr
+*.local
+/dist*
+pnpm-debug
+auto-*.d.ts
+.idea
+.history
+unpackage/cache*
+unpackage/dist*
+unpackage/debug*
+package-lock.json
+
+# Exclude large files
+unpackage/release/
+static/gif/BONUS-2S.gif
+static/gif/bust02s.gif
+static/gif/finish01.24s.gif
