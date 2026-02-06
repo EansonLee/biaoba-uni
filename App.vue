@@ -76,34 +76,59 @@
 			$stores('zegoStore').initEvent();
 		},
 		onShow(options) {
-			this.init(options);
-
-			// 智能横竖屏切换逻辑
-			this.handleOrientationChange();
-			
-			// 应用回到前台，检查是否超过5分钟
+			// 应用回到前台的处理逻辑
 			const authStore = $stores('user');
-			if (authStore.isLogin && this.enterBackgroundTime) {
-				const backgroundDuration = Date.now() - (this.enterBackgroundTime || 0);
-				console.error('后台运时间',backgroundDuration/(1000*60),'分钟=================超过5分钟就登出');
-				if (backgroundDuration < 5 * 60 * 1000) { // 小于5分钟
-					// 恢复在线状态
-					player.Api.updateOnLine(1);
-					this.startHeartbeat();
-					
-					// 应用恢复时主动检查token完整性
-					setTimeout(() => {
-						this.checkTokenIntegrityOnResume();
-					}, 1000);
+			const isReturningFromBackground = this.enterBackgroundTime !== null;
+
+			console.log('📱 [onShow] 应用进入前台', {
+				isReturningFromBackground,
+				isLogin: authStore.isLogin,
+				enterBackgroundTime: this.enterBackgroundTime
+			});
+
+			// 区分两种场景：
+			// 1. 应用首次启动（enterBackgroundTime === null）
+			// 2. 从后台返回（enterBackgroundTime !== null）
+
+			if (!isReturningFromBackground) {
+				// 场景1：应用首次启动 - 需要完整初始化
+				console.log('🚀 [onShow] 应用首次启动，执行完整初始化');
+				this.init(options);
+			} else {
+				// 场景2：从后台返回 - 只需恢复会话，不重新路由
+				console.log('🔄 [onShow] 从后台返回');
+
+				// 检查登录状态和后台时长
+				if (authStore.isLogin) {
+					const backgroundDuration = Date.now() - (this.enterBackgroundTime || 0);
+					const minutes = (backgroundDuration / (1000 * 60)).toFixed(2);
+					console.log(`⏱️ [onShow] 后台运行时间: ${minutes} 分钟`);
+
+					if (backgroundDuration < 5 * 60 * 1000) {
+						// 小于5分钟 - 恢复会话
+						console.log('✅ [onShow] 后台时间 < 5分钟，恢复会话');
+						player.Api.updateOnLine(1);
+						this.startHeartbeat();
+
+						// 应用恢复时主动检查token完整性
+						setTimeout(() => {
+							this.checkTokenIntegrityOnResume();
+						}, 1000);
+					} else {
+						// 超过5分钟 - 需要重新登录
+						console.warn('⚠️ [onShow] 后台时间 > 5分钟，需要重新登录');
+						authStore.clearUserInfo();
+						uni.$emit('user-logout');
+						sheep.$router.go('/pages/index/index');
+					}
 				} else {
-					// 超过5分钟，保持离线状态，需要用户重新登录
-					authStore.clearUserInfo();
-					uni.$emit('user-logout');
-					// 跳转到登录页，显示动画和音效（不传递jumpType=no）					// 跳转到登录页
-					// sheep.$router.go('/pages/index/index?jumpType=no');
-					sheep.$router.go('/pages/index/index');
+					// 未登录状态从后台返回，不做处理
+					console.log('ℹ️ [onShow] 未登录状态，保持当前页面');
 				}
 			}
+
+			// 智能横竖屏切换逻辑（无论哪种场景都需要）
+			this.handleOrientationChange();
 		},
 		onUnload(){
 			//页面卸载时切换为竖屏配置
